@@ -154,7 +154,7 @@ export async function getAllHabitStats() {
   return Object.entries(byHabit).map(([name, logs]) => {
     const totalSessions = logs.length;
     const totalDuration = logs.reduce((s, l) => s + (l.duration || 0), 0);
-    const uniqueDays = [...new Set(logs.map((l) => l.date))];
+    const uniqueDays = Array.from(new Set(logs.map((l) => l.date)));
 
     // Day-of-week frequency
     const dayFreq: Record<string, number> = {};
