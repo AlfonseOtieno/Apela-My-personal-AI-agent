@@ -139,12 +139,7 @@ export default function Dashboard() {
           position: "sticky", top: 0, zIndex: 10,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: "50%",
-              background: "#00a884",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontWeight: 700, fontSize: 16, color: "#fff",
-            }}>A</div>
+            <img src="/icons/icon-192x192.png" alt="Apela" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
             <div>
               <p style={{ fontWeight: 600, fontSize: 14 }}>Apela</p>
               <p style={{ fontSize: 11, color: "#555", fontFamily: "'JetBrains Mono', monospace" }}>dashboard</p>
