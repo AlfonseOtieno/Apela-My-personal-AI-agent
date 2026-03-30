@@ -68,6 +68,7 @@ function WeekStrip({ last7 }: { last7: HabitStat["last7"] }) {
             borderRadius: 4,
             border: d.done ? "none" : "1px solid #222",
             position: "relative",
+
           }} />
           <span style={{ fontSize: 9, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{d.label}</span>
         </div>
