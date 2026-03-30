@@ -113,7 +113,7 @@ export async function getStreak(habitName: string): Promise<number> {
 
   if (!data?.length) return 0;
 
-  const dates = [...new Set(data.map((d) => d.date))].sort().reverse();
+  const dates = Array.from(new Set(data.map((d) => d.date))).sort().reverse();
   const today = format(new Date(), "yyyy-MM-dd");
   const yesterday = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
 
