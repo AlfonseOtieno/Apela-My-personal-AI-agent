@@ -62,10 +62,20 @@ export default function ChatPage() {
 
   // PWA install detection
   useEffect(() => {
-    const isStandalone = window.matchMedia("(display-mode: standalone)").matches ||
-      (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-    if (isStandalone) { setIsInstalled(true); return; }
+    // Check if running as installed PWA — multiple methods
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.matchMedia("(display-mode: fullscreen)").matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true ||
+      document.referrer.includes("android-app://");
 
+    if (isStandalone) {
+      setIsInstalled(true);
+      localStorage.setItem("apela-install-dismissed", "1");
+      return;
+    }
+
+    // Do not show banner if user already installed or dismissed
     if (localStorage.getItem("apela-install-dismissed")) return;
 
     const handler = (e: Event) => {
@@ -75,12 +85,23 @@ export default function ChatPage() {
     };
     window.addEventListener("beforeinstallprompt", handler);
 
-    // iOS Safari fallback
+    // appinstalled fires when user installs — hide banner
+    const installedHandler = () => {
+      setIsInstalled(true);
+      setShowBanner(false);
+      localStorage.setItem("apela-install-dismissed", "1");
+    };
+    window.addEventListener("appinstalled", installedHandler);
+
+    // iOS Safari fallback — only show if not already dismissed
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     if (isIOS && isSafari) setTimeout(() => setShowBanner(true), 3000);
 
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      window.removeEventListener("appinstalled", installedHandler);
+    };
   }, []);
 
   async function handleInstall() {
