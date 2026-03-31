@@ -145,15 +145,32 @@ export default function Dashboard() {
               <p style={{ fontSize: 11, color: "#555", fontFamily: "'JetBrains Mono', monospace" }}>dashboard</p>
             </div>
           </div>
-          <Link href="/chat" style={{
-            fontSize: 13, color: "#00a884",
-            padding: "7px 16px",
-            borderRadius: 6,
-            border: "1px solid #00a884",
-            fontWeight: 600,
-          }}>
-            → Open Chat
-          </Link>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={async () => {
+                if (!confirm("Clear all chat messages? This cannot be undone.")) return;
+                await fetch("/api/clear-messages", { method: "DELETE" });
+                alert("Chat history cleared.");
+              }}
+              style={{
+                fontSize: 12, color: "#555",
+                padding: "7px 14px", borderRadius: 6,
+                border: "1px solid #222", background: "none",
+                cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              Clear chat
+            </button>
+            <Link href="/chat" style={{
+              fontSize: 13, color: "#00a884",
+              padding: "7px 16px",
+              borderRadius: 6,
+              border: "1px solid #00a884",
+              fontWeight: 600,
+            }}>
+              → Open Chat
+            </Link>
+          </div>
         </div>
 
         <div style={{ maxWidth: 800, margin: "0 auto", padding: "24px 20px" }}>

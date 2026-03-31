@@ -56,9 +56,9 @@ export function buildStatContext(logs: HabitLog[], label: string): string {
 export async function generateReport(
   periodType: "week" | "month" | "year"
 ): Promise<string> {
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  // Use REST API directly
+  const apiKey = process.env.GEMINI_API_KEY!;
+  const modelName = "gemini-2.5-flash-lite";
 
   const now = new Date();
   let from: Date, to: Date, label: string;
@@ -97,8 +97,17 @@ Write a ${periodType}ly pattern report. Rules:
 
 Start directly with the report, no greeting.`;
 
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 800 }
+    })
+  });
+  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "No report generated.";
 }
 
 // ── Get streak for a habit ────────────────────────────────────────────────────

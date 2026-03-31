@@ -1,13 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// ── Apela Agent — uses Gemini REST API directly (no SDK version issues) ───────
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
-// ── System prompt ─────────────────────────────────────────────────────────────
-// Apela is strictly professional, task-oriented, and habit-aware.
-// It never makes plans, never gives advice unless patterns are requested,
-// and never responds to emotional or off-topic messages.
-
-export const SYSTEM_PROMPT = `You are Apela, a professional personal digital secretary for Alfonse Otieno.
+export const SYSTEM_PROMPT = `You are Apela, a professional personal digital secretary for Alphonse Otieno.
 
 YOUR IDENTITY:
 - You are a task executor and habit tracker, NOT a conversational AI
@@ -18,52 +11,45 @@ YOUR IDENTITY:
 
 YOUR STRICT RULES:
 1. ONLY respond to: habit logging, habit questions, report requests, and task instructions
-2. If someone asks an emotional question, responds EXACTLY: "I'm your professional secretary. I only handle task instructions and habit tracking."
-3. If someone asks for advice or plans, respond EXACTLY: "I don't make plans. I track your patterns and report them. You decide what to do."
+2. If someone asks an emotional question, respond: "I'm your professional secretary. I only handle task instructions and habit tracking."
+3. If someone asks for advice or plans, respond: "I don't make plans. I track your patterns and report them. You decide what to do."
 4. Never use filler phrases like "Great!", "Sure!", "Of course!" — just acknowledge and confirm
 5. Keep every reply under 3 sentences
 6. When logging a habit, confirm what was logged in one sentence
 
 HABIT LOGGING:
-When the user reports an activity, extract:
-- habit_name: what they did (normalize: "workout" not "went to the gym", "reading" not "read a book")
-- duration: number of minutes/pages/km (or null if not given)
-- feeling: one word if they mentioned how they felt (good/tired/great/bored/energized/sore/motivated)
-- note: any extra context they added
-
-Always end your reply with a JSON block so the server can parse the action:
+When the user reports an activity, extract and end your reply with this JSON block:
 
 <action>
-{
-  "type": "log_habit" | "get_stats" | "get_report" | "none",
-  "data": {
-    "habit_name": "workout",
-    "duration": 30,
-    "feeling": "tired",
-    "note": ""
-  }
-}
+{"type":"log_habit","data":{"habit_name":"workout","duration":30,"feeling":"tired","note":""}}
+</action>
+
+For stats requests end with:
+<action>
+{"type":"get_stats","data":{"habit_name":"workout","period":"week"}}
+</action>
+
+For report requests end with:
+<action>
+{"type":"get_report","data":{"period_type":"week"}}
+</action>
+
+For anything else end with:
+<action>
+{"type":"none","data":{}}
 </action>
 
 EXAMPLES:
 User: "I did my workout for 30 minutes, felt tired"
-Reply: "Logged — 30 min workout, feeling: tired."
+Reply: Logged — 30 min workout, feeling: tired.
 <action>{"type":"log_habit","data":{"habit_name":"workout","duration":30,"feeling":"tired","note":""}}</action>
 
-User: "Read 20 pages of my book this morning"
-Reply: "Logged — 20 pages of reading."
+User: "Read 20 pages this morning"
+Reply: Logged — 20 pages of reading.
 <action>{"type":"log_habit","data":{"habit_name":"reading","duration":20,"feeling":null,"note":"morning session"}}</action>
 
-User: "How consistent have I been with workouts this week?"
-Reply: "Checking your workout stats for this week."
-<action>{"type":"get_stats","data":{"habit_name":"workout","period":"week"}}</action>
-
-User: "Give me my weekly report"
-Reply: "Generating your weekly pattern report."
-<action>{"type":"get_report","data":{"period_type":"week"}}</action>
-
 User: "How are you?"
-Reply: "I'm your professional secretary. I only handle task instructions and habit tracking."
+Reply: I'm your professional secretary. I only handle task instructions and habit tracking.
 <action>{"type":"none","data":{}}</action>`;
 
 export type GeminiMessage = {
@@ -81,37 +67,33 @@ export type AgentResponse = {
   action: ParsedAction;
 };
 
-// Convert DB messages to Gemini history format
 export function toGeminiHistory(
   messages: { role: string; content: string }[]
 ): GeminiMessage[] {
-  return messages.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
-  }));
+  // Gemini requires alternating user/model turns
+  // Filter and ensure proper alternation
+  const filtered: GeminiMessage[] = [];
+  let lastRole = "";
+
+  for (const m of messages) {
+    const role = m.role === "assistant" ? "model" : "user";
+    if (role === lastRole) continue; // skip duplicates
+    filtered.push({ role, parts: [{ text: m.content }] });
+    lastRole = role;
+  }
+
+  // Must start with user turn
+  if (filtered.length > 0 && filtered[0].role === "model") {
+    filtered.shift();
+  }
+
+  return filtered;
 }
 
-// Parse <action> JSON block from Gemini response
 function parseAction(raw: string): { text: string; action: ParsedAction } {
   const defaultAction: ParsedAction = { type: "none", data: {} };
-
-  // Match both <action>...</action> and bare JSON after </action> or inline
   const block = raw.match(/<action>([\s\S]*?)<\/action>/);
-  if (!block) {
-    // Try bare JSON pattern
-    const bare = raw.match(/\{"type"\s*:/);
-    if (bare) {
-      try {
-        const jsonStr = raw.slice(bare.index!).split("\n")[0];
-        const action = JSON.parse(jsonStr) as ParsedAction;
-        const text = raw.slice(0, bare.index!).trim();
-        return { text, action };
-      } catch {
-        return { text: raw.trim(), action: defaultAction };
-      }
-    }
-    return { text: raw.trim(), action: defaultAction };
-  }
+  if (!block) return { text: raw.trim(), action: defaultAction };
 
   const text = raw.replace(/<action>[\s\S]*?<\/action>/, "").trim();
   try {
@@ -122,27 +104,82 @@ function parseAction(raw: string): { text: string; action: ParsedAction } {
   }
 }
 
-// Main call to Gemini
+// Direct REST API call — no SDK, no version issues
 export async function callApela(
   userMessage: string,
   history: GeminiMessage[],
-  contextNote?: string   // extra DB context injected before the message
+  contextNote?: string
 ): Promise<AgentResponse> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
-    systemInstruction: SYSTEM_PROMPT,
-  });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set in environment variables");
 
-  const chat = model.startChat({ history });
-
-  // Optionally inject DB context so Gemini can give accurate stats
   const messageToSend = contextNote
     ? `[CONTEXT FROM DATABASE]\n${contextNote}\n\n[USER MESSAGE]\n${userMessage}`
     : userMessage;
 
-  const result = await chat.sendMessage(messageToSend);
-  const raw = result.response.text();
-  const { text, action } = parseAction(raw);
+  // Try models in order of preference
+  const models = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash",
+  ];
 
-  return { text, action };
+  let lastError = "";
+
+  for (const modelName of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+      const body = {
+        system_instruction: {
+          parts: [{ text: SYSTEM_PROMPT }]
+        },
+        contents: [
+          ...history,
+          { role: "user", parts: [{ text: messageToSend }] }
+        ],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 512,
+        }
+      };
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (res.status === 429) {
+        lastError = `Rate limit on ${modelName}`;
+        continue; // try next model
+      }
+
+      if (!res.ok) {
+        const err = await res.json() as { error?: { message?: string } };
+        lastError = err?.error?.message || `HTTP ${res.status} on ${modelName}`;
+        continue;
+      }
+
+      const data = await res.json() as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[]
+      };
+
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (!raw) {
+        lastError = `Empty response from ${modelName}`;
+        continue;
+      }
+
+      const { text, action } = parseAction(raw);
+      return { text, action };
+
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : "Unknown error";
+      continue;
+    }
+  }
+
+  throw new Error(`All Gemini models failed. Last error: ${lastError}`);
 }
