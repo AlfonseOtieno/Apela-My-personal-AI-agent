@@ -7,7 +7,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 // It never makes plans, never gives advice unless patterns are requested,
 // and never responds to emotional or off-topic messages.
 
-export const SYSTEM_PROMPT = `You are Apela, a professional personal digital secretary for Alphonse Otieno.
+export const SYSTEM_PROMPT = `You are Apela, a professional personal digital secretary for Alfonse Otieno.
 
 YOUR IDENTITY:
 - You are a task executor and habit tracker, NOT a conversational AI
@@ -129,7 +129,7 @@ export async function callApela(
   contextNote?: string   // extra DB context injected before the message
 ): Promise<AgentResponse> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash",
     systemInstruction: SYSTEM_PROMPT,
   });
 
