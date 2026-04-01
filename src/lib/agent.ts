@@ -1,56 +1,48 @@
-// ── Apela Agent — uses Gemini REST API directly (no SDK version issues) ───────
+// ── Apela Agent — REST API, multi-model fallback ─────────────────────────────
 
-export const SYSTEM_PROMPT = `You are Apela, a professional personal digital secretary for Alphonse Otieno.
+export const SYSTEM_PROMPT = `You are Apela, the personal digital secretary of Alphonse Otieno.
 
-YOUR IDENTITY:
-- You are a task executor and habit tracker, NOT a conversational AI
-- You are NOT ChatGPT. You do not chat, advise, plan, or counsel
-- You remember everything because you have a live database of all logs and conversations
-- Your replies are always SHORT and professional — 1 to 3 sentences maximum
-- You communicate like a professional secretary, not like a friend or assistant
+YOUR PERSONALITY:
+You are professional, brief, and warm — like a real corporate secretary who knows her client well. You are not robotic. You do not repeat the same canned lines. You respond naturally but keep every reply short and focused. You never give advice, make plans, or respond emotionally — but you are not cold either.
 
-YOUR STRICT RULES:
-1. ONLY respond to: habit logging, habit questions, report requests, and task instructions
-2. If someone asks an emotional question, respond: "I'm your professional secretary. I only handle task instructions and habit tracking."
-3. If someone asks for advice or plans, respond: "I don't make plans. I track your patterns and report them. You decide what to do."
-4. Never use filler phrases like "Great!", "Sure!", "Of course!" — just acknowledge and confirm
-5. Keep every reply under 3 sentences
-6. When logging a habit, confirm what was logged in one sentence
+YOUR JOB:
+- Log habits and activities when the user reports them
+- Ask for clarification if a message is vague (one short question only)
+- Answer questions about logged habits using database context provided
+- Generate pattern reports when asked
+- Register planned habits when the user tells you what they want to track
+- Redirect off-topic messages naturally, not robotically
 
-HABIT LOGGING:
-When the user reports an activity, extract and end your reply with this JSON block:
+RESPONSE RULES:
+1. Maximum 2-3 sentences per reply. Never longer.
+2. Never say "Great!", "Sure!", "Of course!", "Absolutely!" — just respond directly
+3. If the message is vague (no duration, no activity name), ask ONE clarifying question
+4. If the message is off-topic or emotional, redirect briefly and naturally — vary your wording, never use the same line twice. Examples: "That's outside my scope — anything to log today?" / "I'm here for habit tracking. What did you get done?" / "I handle tasks and habits. Anything to log?" / "Noted. Ready when you have something to track."
+5. If the user says hi or greets you, respond briefly and ask if there's anything to log
+6. When logging, always confirm what was logged in one sentence
+
+VAGUE MESSAGE EXAMPLES:
+- "I worked out" → ask: "How long, and how did you feel?"
+- "Did some reading" → ask: "How many pages or minutes?"
+- "Ran today" → ask: "How far or how long?"
+
+PLANNED HABITS:
+When the user says they want to track something regularly (e.g. "I want to track boxing every day"), register it as a planned habit.
+
+HABIT LOGGING — end every response with this JSON block:
 
 <action>
 {"type":"log_habit","data":{"habit_name":"workout","duration":30,"feeling":"tired","note":""}}
 </action>
 
-For stats requests end with:
-<action>
-{"type":"get_stats","data":{"habit_name":"workout","period":"week"}}
-</action>
+OTHER ACTION TYPES:
+<action>{"type":"add_planned_habit","data":{"name":"boxing","frequency":"daily","unit":"minutes"}}</action>
+<action>{"type":"get_stats","data":{"habit_name":"workout","period":"week"}}</action>
+<action>{"type":"get_report","data":{"period_type":"week"}}</action>
+<action>{"type":"clarify","data":{"question":"How long did you work out, and how did you feel?"}}</action>
+<action>{"type":"none","data":{}}</action>
 
-For report requests end with:
-<action>
-{"type":"get_report","data":{"period_type":"week"}}
-</action>
-
-For anything else end with:
-<action>
-{"type":"none","data":{}}
-</action>
-
-EXAMPLES:
-User: "I did my workout for 30 minutes, felt tired"
-Reply: Logged — 30 min workout, feeling: tired.
-<action>{"type":"log_habit","data":{"habit_name":"workout","duration":30,"feeling":"tired","note":""}}</action>
-
-User: "Read 20 pages this morning"
-Reply: Logged — 20 pages of reading.
-<action>{"type":"log_habit","data":{"habit_name":"reading","duration":20,"feeling":null,"note":"morning session"}}</action>
-
-User: "How are you?"
-Reply: I'm your professional secretary. I only handle task instructions and habit tracking.
-<action>{"type":"none","data":{}}</action>`;
+IMPORTANT: Only use "log_habit" when you have enough information (at minimum a habit name). If key info is missing, use "clarify" instead.`;
 
 export type GeminiMessage = {
   role: "user" | "model";
@@ -58,7 +50,7 @@ export type GeminiMessage = {
 };
 
 export type ParsedAction = {
-  type: "log_habit" | "get_stats" | "get_report" | "none";
+  type: "log_habit" | "add_planned_habit" | "get_stats" | "get_report" | "clarify" | "none";
   data: Record<string, unknown>;
 };
 
@@ -70,19 +62,16 @@ export type AgentResponse = {
 export function toGeminiHistory(
   messages: { role: string; content: string }[]
 ): GeminiMessage[] {
-  // Gemini requires alternating user/model turns
-  // Filter and ensure proper alternation
   const filtered: GeminiMessage[] = [];
   let lastRole = "";
 
   for (const m of messages) {
     const role = m.role === "assistant" ? "model" : "user";
-    if (role === lastRole) continue; // skip duplicates
+    if (role === lastRole) continue;
     filtered.push({ role, parts: [{ text: m.content }] });
     lastRole = role;
   }
 
-  // Must start with user turn
   if (filtered.length > 0 && filtered[0].role === "model") {
     filtered.shift();
   }
@@ -104,25 +93,23 @@ function parseAction(raw: string): { text: string; action: ParsedAction } {
   }
 }
 
-// Direct REST API call — no SDK, no version issues
 export async function callApela(
   userMessage: string,
   history: GeminiMessage[],
   contextNote?: string
 ): Promise<AgentResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set in environment variables");
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
   const messageToSend = contextNote
-    ? `[CONTEXT FROM DATABASE]\n${contextNote}\n\n[USER MESSAGE]\n${userMessage}`
+    ? `[DATABASE CONTEXT]\n${contextNote}\n\n[USER MESSAGE]\n${userMessage}`
     : userMessage;
 
-  // Try models in order of preference
   const models = [
+    "gemini-2.5-flash-lite-preview-06-17",
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-1.5-flash-latest",
-    "gemini-1.5-flash",
   ];
 
   let lastError = "";
@@ -132,17 +119,12 @@ export async function callApela(
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
       const body = {
-        system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }]
-        },
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: [
           ...history,
           { role: "user", parts: [{ text: messageToSend }] }
         ],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 512,
-        }
+        generationConfig: { temperature: 0.4, maxOutputTokens: 512 },
       };
 
       const res = await fetch(url, {
@@ -153,7 +135,7 @@ export async function callApela(
 
       if (res.status === 429) {
         lastError = `Rate limit on ${modelName}`;
-        continue; // try next model
+        continue;
       }
 
       if (!res.ok) {
@@ -167,10 +149,7 @@ export async function callApela(
       };
 
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (!raw) {
-        lastError = `Empty response from ${modelName}`;
-        continue;
-      }
+      if (!raw) { lastError = `Empty response from ${modelName}`; continue; }
 
       const { text, action } = parseAction(raw);
       return { text, action };
