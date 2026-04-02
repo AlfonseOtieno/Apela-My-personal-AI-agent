@@ -2,7 +2,15 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
 import { callApela, toGeminiHistory } from "@/lib/agent";
 import { getLogsForPeriod, buildStatContext, generateReport, getStreak } from "@/lib/stats";
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from "date-fns";
+
+// Parse a log_date string from the action — falls back to today
+function resolveLogDate(logDate: unknown): string {
+  if (typeof logDate === "string" && logDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    return logDate;
+  }
+  return format(new Date(), "yyyy-MM-dd");
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -13,12 +21,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const db = supabaseAdmin();
 
   try {
-    // 1. Load last 30 messages as history
+    // 1. Load last 40 messages for context — more history = better context awareness
     const { data: history } = await db
       .from("messages")
       .select("role, content")
       .order("created_at", { ascending: true })
-      .limit(30);
+      .limit(40);
 
     const geminiHistory = toGeminiHistory(history || []);
 
@@ -38,9 +46,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           duration?: number;
           feeling?: string;
           note?: string;
+          log_date?: string;
         };
-
         if (!d.habit_name) break;
+
+        const logDate = resolveLogDate(d.log_date);
 
         // Upsert habit definition
         const { data: existing } = await db
@@ -65,12 +75,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           duration:   d.duration || null,
           feeling:    d.feeling  || null,
           note:       d.note     || null,
+          date:       logDate,
+          logged_at:  new Date().toISOString(),
         }]);
 
-        // Append streak if more than 1
+        // Show if logged to a past date
+        const today = format(new Date(), "yyyy-MM-dd");
+        const dateNote = logDate !== today ? ` (logged to ${logDate})` : "";
+
         const streak = await getStreak(d.habit_name);
         if (streak > 1) {
-          finalReply = `${text} ${streak}-day streak on ${d.habit_name}.`;
+          finalReply = `${text}${dateNote} ${streak}-day streak on ${d.habit_name}.`;
+        } else if (dateNote) {
+          finalReply = `${text}${dateNote}`;
         }
         break;
       }
@@ -80,14 +97,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           name: string;
           frequency?: string;
           unit?: string;
+          start_time?: string;
+          end_time?: string;
+          target?: string;
         };
         if (!d.name) break;
 
         await db.from("planned_habits").upsert([{
-          name:      d.name,
-          frequency: d.frequency || "daily",
-          unit:      d.unit      || "minutes",
-          active:    true,
+          name:       d.name.toLowerCase(),
+          frequency:  d.frequency  || "daily",
+          unit:       d.unit       || "minutes",
+          start_time: d.start_time || null,
+          end_time:   d.end_time   || null,
+          target:     d.target     || null,
+          active:     true,
         }], { onConflict: "name" });
         break;
       }
@@ -118,17 +141,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           `${now.getFullYear()}`;
 
         await db.from("reports").upsert([{
-          period:      periodKey,
-          period_type: periodType,
-          content:     finalReply,
+          period: periodKey, period_type: periodType, content: finalReply,
         }], { onConflict: "period" });
         break;
       }
 
       case "clarify":
-        // Gemini already put the clarifying question in `text` — just use it
-        break;
-
       case "none":
       default:
         break;
@@ -136,18 +154,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 5. Save assistant reply
     await db.from("messages").insert([{ role: "assistant", content: finalReply }]);
-
     return res.status(200).json({ reply: finalReply });
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error("Apela chat error:", msg);
-
-    const errorReply = `Something went wrong on my end: ${msg}`;
-    try {
-      await db.from("messages").insert([{ role: "assistant", content: errorReply }]);
-    } catch { /* ignore secondary failure */ }
-
+    const errorReply = `Something went wrong: ${msg}`;
+    try { await db.from("messages").insert([{ role: "assistant", content: errorReply }]); } catch { /* ignore */ }
     return res.status(200).json({ reply: errorReply });
   }
 }

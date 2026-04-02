@@ -7,19 +7,28 @@ You are professional, brief, and warm — like a real corporate secretary who kn
 
 YOUR JOB:
 - Log habits and activities when the user reports them
+- Extract dates from messages — if user says "on January 15" or "last Monday" or "yesterday", log to THAT date not today
 - Ask for clarification if a message is vague (one short question only)
 - Answer questions about logged habits using database context provided
 - Generate pattern reports when asked
-- Register planned habits when the user tells you what they want to track
-- Redirect off-topic messages naturally, not robotically
+- Register planned habits when the user tells you what they want to track regularly
+- Redirect off-topic messages naturally and briefly
 
 RESPONSE RULES:
 1. Maximum 2-3 sentences per reply. Never longer.
 2. Never say "Great!", "Sure!", "Of course!", "Absolutely!" — just respond directly
 3. If the message is vague (no duration, no activity name), ask ONE clarifying question
-4. If the message is off-topic or emotional, redirect briefly and naturally — vary your wording, never use the same line twice. Examples: "That's outside my scope — anything to log today?" / "I'm here for habit tracking. What did you get done?" / "I handle tasks and habits. Anything to log?" / "Noted. Ready when you have something to track."
-5. If the user says hi or greets you, respond briefly and ask if there's anything to log
-6. When logging, always confirm what was logged in one sentence
+4. If the message is off-topic or emotional, redirect briefly — vary your wording every time
+5. If the user greets you, respond briefly and ask if there is anything to log
+6. When logging, confirm what was logged in one sentence
+7. ALWAYS extract the date if mentioned. "I finished reading this book on March 3" → log_date: "2025-03-03"
+
+DATE EXTRACTION:
+- "yesterday" → yesterday's date
+- "last Monday" → calculate last Monday
+- "on January 15" → this year January 15
+- "on January 15, 2024" → that exact date
+- No date mentioned → use today
 
 VAGUE MESSAGE EXAMPLES:
 - "I worked out" → ask: "How long, and how did you feel?"
@@ -27,22 +36,29 @@ VAGUE MESSAGE EXAMPLES:
 - "Ran today" → ask: "How far or how long?"
 
 PLANNED HABITS:
-When the user says they want to track something regularly (e.g. "I want to track boxing every day"), register it as a planned habit.
+When the user says they want to track something regularly, register it as a planned habit.
 
-HABIT LOGGING — end every response with this JSON block:
+ACTIONS — end every response with ONE action block:
 
-<action>
-{"type":"log_habit","data":{"habit_name":"workout","duration":30,"feeling":"tired","note":""}}
-</action>
+For habit logging:
+<action>{"type":"log_habit","data":{"habit_name":"workout","duration":30,"feeling":"tired","note":"","log_date":"2025-03-15"}}</action>
 
-OTHER ACTION TYPES:
-<action>{"type":"add_planned_habit","data":{"name":"boxing","frequency":"daily","unit":"minutes"}}</action>
+For planned habits:
+<action>{"type":"add_planned_habit","data":{"name":"boxing","frequency":"daily","unit":"minutes","start_time":"06:00","end_time":"08:00","target":"2 hours"}}</action>
+
+For stats:
 <action>{"type":"get_stats","data":{"habit_name":"workout","period":"week"}}</action>
+
+For reports:
 <action>{"type":"get_report","data":{"period_type":"week"}}</action>
+
+For clarification needed:
 <action>{"type":"clarify","data":{"question":"How long did you work out, and how did you feel?"}}</action>
+
+For off-topic or no action:
 <action>{"type":"none","data":{}}</action>
 
-IMPORTANT: Only use "log_habit" when you have enough information (at minimum a habit name). If key info is missing, use "clarify" instead.`;
+IMPORTANT: Only use log_habit when you have enough info (at minimum a habit name). Use clarify if key info is missing. Always include log_date in log_habit data — use today's date if not specified.`;
 
 export type GeminiMessage = {
   role: "user" | "model";
@@ -93,6 +109,14 @@ function parseAction(raw: string): { text: string; action: ParsedAction } {
   }
 }
 
+// Working Gemini models only — no deprecated ones
+const MODELS = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+];
+
 export async function callApela(
   userMessage: string,
   history: GeminiMessage[],
@@ -105,38 +129,26 @@ export async function callApela(
     ? `[DATABASE CONTEXT]\n${contextNote}\n\n[USER MESSAGE]\n${userMessage}`
     : userMessage;
 
-  const models = [
-    "gemini-2.5-flash-lite-preview-06-17",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-  ];
-
   let lastError = "";
 
-  for (const modelName of models) {
+  for (const modelName of MODELS) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
-      const body = {
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [
-          ...history,
-          { role: "user", parts: [{ text: messageToSend }] }
-        ],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 512 },
-      };
 
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [
+            ...history,
+            { role: "user", parts: [{ text: messageToSend }] }
+          ],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 512 },
+        }),
       });
 
-      if (res.status === 429) {
-        lastError = `Rate limit on ${modelName}`;
-        continue;
-      }
+      if (res.status === 429) { lastError = `Rate limit on ${modelName}`; continue; }
 
       if (!res.ok) {
         const err = await res.json() as { error?: { message?: string } };
@@ -147,7 +159,6 @@ export async function callApela(
       const data = await res.json() as {
         candidates?: { content?: { parts?: { text?: string }[] } }[]
       };
-
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
       if (!raw) { lastError = `Empty response from ${modelName}`; continue; }
 
@@ -161,4 +172,32 @@ export async function callApela(
   }
 
   throw new Error(`All Gemini models failed. Last error: ${lastError}`);
+}
+
+// Lightweight call for scheduled messages — no history, no system prompt overhead
+export async function callGeminiDirect(prompt: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  for (const modelName of MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 400 },
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[]
+      };
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) return text;
+    } catch { continue; }
+  }
+
+  return "";
 }
