@@ -15,18 +15,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "POST") {
-    const { name, frequency, unit } = req.body as {
+    const { name, frequency, unit, preferred_time, target, specific_days } = req.body as {
       name: string;
       frequency?: string;
       unit?: string;
+      preferred_time?: string;
+      target?: string;
+      specific_days?: string[];
     };
     if (!name?.trim()) return res.status(400).json({ error: "Name required" });
 
     const { data, error } = await db
       .from("planned_habits")
-      .upsert([{ name, frequency: frequency || "daily", unit: unit || "minutes", active: true }], { onConflict: "name" })
+      .upsert([{
+        name:           name.trim().toLowerCase(),
+        frequency:      frequency      || "daily",
+        unit:           unit           || "minutes",
+        preferred_time: preferred_time || null,
+        target:         target         || null,
+        specific_days:  specific_days  || [],
+        active:         true,
+      }], { onConflict: "name" })
       .select()
       .single();
+
     if (error) return res.status(500).json({ error: error.message });
     return res.status(201).json(data);
   }
