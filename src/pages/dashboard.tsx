@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import GoogleTab from "@/components/GoogleTab";
 import Head from "next/head";
 import Link from "next/link";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, isSameMonth, isToday } from "date-fns";
@@ -382,7 +383,7 @@ export default function Dashboard() {
   const [stats, setStats]       = useState<HabitStat[]>([]);
   const [planned, setPlanned]   = useState<PlannedHabit[]>([]);
   const [reports, setReports]   = useState<Report[]>([]);
-  const [tab, setTab]           = useState<"overview"|"planned"|"calendar"|"logs"|"reports">("overview");
+  const [tab, setTab]           = useState<"overview"|"planned"|"calendar"|"logs"|"reports"|"google">("overview");
   const [loading, setLoading]   = useState(true);
   const [genLoading, setGenLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -457,6 +458,7 @@ export default function Dashboard() {
             {tabBtn("calendar","Calendar")}
             {tabBtn("logs","Logs")}
             {tabBtn("reports","Reports")}
+            {tabBtn("google","Google")}
           </div>
 
           {loading && <p style={{ color:"#444", fontFamily:"'JetBrains Mono',monospace", fontSize:13 }}>Loading…</p>}
@@ -562,6 +564,9 @@ export default function Dashboard() {
               ))}
             </div>
           )}
+
+          {/* ── GOOGLE ── */}
+          {!loading && tab==="google" && <GoogleTab />}
 
           {/* ── REPORTS ── */}
           {!loading && tab==="reports" && (
