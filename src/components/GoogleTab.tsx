@@ -45,14 +45,25 @@ export default function GoogleTab() {
   const [savingTask, setSavingTask] = useState(false);
 
   useEffect(() => {
-    // Check if Google is connected by trying to fetch events
+    // Show error from URL if OAuth failed
+    const params = new URLSearchParams(window.location.search);
+    const urlError = params.get("error");
+    if (urlError) setError(decodeURIComponent(urlError));
+
+    // Check if Google is connected
     fetch("/api/google-calendar")
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
           setConnected(true);
           setEvents(data);
+          setError("");
         } else {
+          // Show the actual error message from the API
+          const errMsg = (data as { error?: string }).error || "Not connected";
+          if (!errMsg.includes("not connected") && !errMsg.includes("Not connected")) {
+            setError(errMsg);
+          }
           setConnected(false);
         }
         setChecking(false);

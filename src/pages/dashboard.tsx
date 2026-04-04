@@ -390,6 +390,13 @@ export default function Dashboard() {
   const [editingHabit, setEditingHabit] = useState<PlannedHabit | null>(null);
 
   useEffect(() => {
+    // Read tab from URL params (e.g. after Google OAuth redirect)
+    const params = new URLSearchParams(window.location.search);
+    const urlTab = params.get("tab");
+    if (urlTab) setTab(urlTab as typeof tab);
+    // Clean URL without reload
+    if (params.toString()) window.history.replaceState({}, "", window.location.pathname);
+
     Promise.all([
       fetch("/api/stats").then(r => r.json()),
       fetch("/api/planned-habits").then(r => r.json()),
