@@ -1,28 +1,32 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
 
-// Temporary debug endpoint — remove after fixing
-// Visit: /api/debug-google to see what's stored
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const db = supabaseAdmin();
-  
-  // Check if token exists in DB
+
+  // Use select without .single() to avoid the coerce error
   const { data, error } = await db
     .from("oauth_tokens")
     .select("provider, expires_at, updated_at")
-    .eq("provider", "google")
-    .single();
+    .eq("provider", "google");
 
-  // Check env vars are set (don't expose values)
   const envCheck = {
-    GOOGLE_CLIENT_ID:     !!process.env.GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET: !!process.env.GOOGLE_CLIENT_SECRET,
+    GOOGLE_CLIENT_ID:     process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID.slice(0, 20) + "..." : "NOT SET",
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? "SET (hidden)" : "NOT SET",
     GOOGLE_REDIRECT_URI:  process.env.GOOGLE_REDIRECT_URI || "NOT SET",
   };
 
+  // Also try a direct insert test to verify the table works
+  const testInsert = await db
+    .from("oauth_tokens")
+    .select("*")
+    .limit(1);
+
   return res.status(200).json({
-    token_in_db: data || null,
-    db_error:    error?.message || null,
-    env_vars:    envCheck,
+    token_found:    data && data.length > 0,
+    token_data:     data?.[0] || null,
+    db_error:       error?.message || null,
+    table_check:    testInsert.error ? testInsert.error.message : "table OK",
+    env_vars:       envCheck,
   });
 }
