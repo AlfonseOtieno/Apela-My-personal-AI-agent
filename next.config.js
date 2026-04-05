@@ -2,14 +2,12 @@
 const withPWA = require("next-pwa")({
   dest: "public",
   register: true,
-  skipWaiting: true,        // new service worker takes over immediately
-  clientsClaim: true,       // new SW claims all open tabs immediately
+  skipWaiting: true,
+  clientsClaim: true,
   disable: process.env.NODE_ENV === "development",
   reloadOnOnline: true,
-  cacheOnFrontEndNav: false, // don't cache nav — always fetch fresh
-  fallbacks: {
-    document: "/offline",   // optional offline page
-  },
+  cacheOnFrontEndNav: false,
+  // Removed fallbacks — /offline page doesn't exist and breaks SW registration
 });
 
 module.exports = withPWA({

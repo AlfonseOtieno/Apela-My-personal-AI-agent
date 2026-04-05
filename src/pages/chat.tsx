@@ -75,11 +75,11 @@ export default function ChatPage() {
       return;
     }
 
-    // Do not show banner if user already installed or dismissed
-    if (localStorage.getItem("apela-install-dismissed")) return;
-
+    // If Chrome fires beforeinstallprompt, the app is not installed
+    // Clear any dismissed flag so the banner shows again after uninstall
     const handler = (e: Event) => {
       e.preventDefault();
+      localStorage.removeItem("apela-install-dismissed");
       setInstallPrompt(e as BeforeInstallPromptEvent);
       setShowBanner(true);
     };
