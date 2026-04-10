@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
+import { supabase } from "@/lib/supabase";
 import Head from "next/head";
 import Link from "next/link";
 
@@ -57,6 +58,7 @@ export default function ChatPage() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showBanner, setShowBanner]       = useState(false);
   const [isInstalled, setIsInstalled]     = useState(false);
+  const [session, setSession]             = useState<{ access_token: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
 
@@ -75,11 +77,11 @@ export default function ChatPage() {
       return;
     }
 
-    // If Chrome fires beforeinstallprompt, the app is not installed
-    // Clear any dismissed flag so the banner shows again after uninstall
+    // Do not show banner if user already installed or dismissed
+    if (localStorage.getItem("apela-install-dismissed")) return;
+
     const handler = (e: Event) => {
       e.preventDefault();
-      localStorage.removeItem("apela-install-dismissed");
       setInstallPrompt(e as BeforeInstallPromptEvent);
       setShowBanner(true);
     };
@@ -127,9 +129,17 @@ export default function ChatPage() {
     localStorage.setItem("apela-install-dismissed", "1");
   }
 
-  // Load messages
+  // Auth check + load messages
   useEffect(() => {
-    fetch("/api/messages")
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) { window.location.href = "/login"; return; }
+      setSession(data.session);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    fetch("/api/messages", { headers: { Authorization: `Bearer ${session.access_token}` } })
       .then(r => r.json())
       .then((data: { id:string; role:string; content:string; created_at:string }[]) => {
         if (!Array.isArray(data)) return;
@@ -144,7 +154,7 @@ export default function ChatPage() {
         setMessages([{ id:"greeting", role:"assistant", content:"Hello, I'm Apela — your personal digital secretary.\n\nI track your habits, log your activities, and report your patterns. What can I do for you?", time:nowTime() }]);
         setBooted(true);
       });
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     if (booted) bottomRef.current?.scrollIntoView({ behavior:"smooth" });

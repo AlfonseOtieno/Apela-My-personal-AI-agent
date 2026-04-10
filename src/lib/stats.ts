@@ -9,7 +9,8 @@ import {
 export async function getLogsForPeriod(
   habitName: string | null,
   from: Date,
-  to: Date
+  to: Date,
+  userId?: string
 ): Promise<HabitLog[]> {
   const db = supabaseAdmin();
   let q = db
@@ -20,12 +21,13 @@ export async function getLogsForPeriod(
     .order("date", { ascending: true });
 
   if (habitName) q = q.ilike("habit_name", `%${habitName}%`);
+  if (userId) q = q.eq("user_id", userId);
   const { data } = await q;
   return data || [];
 }
 
 // ── Fetch planned habits ──────────────────────────────────────────────────────
-export async function getPlannedHabits() {
+export async function getPlannedHabits(userId) {
   const db = supabaseAdmin();
   const { data } = await db
     .from("planned_habits")
@@ -67,7 +69,9 @@ export function buildStatContext(logs: HabitLog[], label: string): string {
 
 // ── Generate weekly pattern report ───────────────────────────────────────────
 export async function generateReport(
-  periodType: "week" | "month" | "year"
+  periodType: "week" | "month" | "year",
+  userId?: string,
+  geminiKey?: string
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY!;
   const now = new Date();
@@ -88,8 +92,8 @@ export async function generateReport(
   }
 
   const [logs, planned] = await Promise.all([
-    getLogsForPeriod(null, from, to),
-    getPlannedHabits(),
+    getLogsForPeriod(null, from, to, userId),
+    getPlannedHabits(userId),
   ]);
 
   const logContext = buildStatContext(logs, label);
@@ -130,6 +134,7 @@ STRICT RULES:
 
   const models = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash-latest"];
 
+  const apiKey = geminiKey || process.env.GEMINI_API_KEY!;
   for (const modelName of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
@@ -154,14 +159,16 @@ STRICT RULES:
 }
 
 // ── Get streak ────────────────────────────────────────────────────────────────
-export async function getStreak(habitName: string): Promise<number> {
+export async function getStreak(habitName: string, userId?: string): Promise<number> {
   const db = supabaseAdmin();
-  const { data } = await db
+  let q = db
     .from("habit_logs")
     .select("date")
     .ilike("habit_name", `%${habitName}%`)
     .order("date", { ascending: false })
     .limit(90);
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q;
 
   if (!data?.length) return 0;
 

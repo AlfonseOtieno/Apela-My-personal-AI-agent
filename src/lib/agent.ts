@@ -133,10 +133,11 @@ const MODELS = [
 export async function callApela(
   userMessage: string,
   history: GeminiMessage[],
-  contextNote?: string
+  contextNote?: string,
+  geminiKey?: string
 ): Promise<AgentResponse> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+  const apiKey = geminiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("No Gemini API key available");
 
   const messageToSend = contextNote
     ? `[DATABASE CONTEXT]\n${contextNote}\n\n[USER MESSAGE]\n${userMessage}`
