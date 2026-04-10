@@ -27,13 +27,11 @@ export async function getLogsForPeriod(
 }
 
 // ── Fetch planned habits ──────────────────────────────────────────────────────
-export async function getPlannedHabits(userId) {
+export async function getPlannedHabits(userId?: string) {
   const db = supabaseAdmin();
-  const { data } = await db
-    .from("planned_habits")
-    .select("*")
-    .eq("active", true)
-    .order("created_at", { ascending: true });
+  let q = db.from("planned_habits").select("*").eq("active", true).order("created_at", { ascending: true });
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q;
   return data || [];
 }
 
@@ -73,7 +71,6 @@ export async function generateReport(
   userId?: string,
   geminiKey?: string
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY!;
   const now = new Date();
   let from: Date, to: Date, label: string;
 
