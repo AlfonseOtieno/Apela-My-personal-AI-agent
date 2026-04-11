@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import { format, parseISO } from "date-fns";
 
 type CalendarEvent = {
@@ -22,6 +23,7 @@ function Inp({ value, onChange, placeholder, type="text" }: { value:string; onCh
 export default function GoogleTab() {
   const [connected, setConnected]   = useState(false);
   const [checking, setChecking]     = useState(true);
+  const [token, setToken]           = useState("");
   const [events, setEvents]         = useState<CalendarEvent[]>([]);
   const [tasks, setTasks]           = useState<Task[]>([]);
   const [loadingData, setLoadingData] = useState(false);
@@ -45,13 +47,15 @@ export default function GoogleTab() {
   const [savingTask, setSavingTask] = useState(false);
 
   useEffect(() => {
-    // Show error from URL if OAuth failed
     const params = new URLSearchParams(window.location.search);
     const urlError = params.get("error");
     if (urlError) setError(decodeURIComponent(urlError));
 
-    // Check if Google is connected
-    fetch("/api/google-calendar")
+    supabase.auth.getSession().then(({ data }) => {
+      const t = data.session?.access_token || "";
+      setToken(t);
+
+      fetch("/api/google-calendar", { headers: { Authorization: `Bearer ${t}` } })
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -70,10 +74,11 @@ export default function GoogleTab() {
       })
       .catch(() => { setConnected(false); setChecking(false); });
 
-    fetch("/api/google-tasks")
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setTasks(data); })
-      .catch(() => {});
+      fetch("/api/google-tasks", { headers: { Authorization: `Bearer ${t}` } })
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setTasks(data); })
+        .catch(() => {});
+    });
   }, []);
 
   async function saveEvent() {
@@ -83,7 +88,7 @@ export default function GoogleTab() {
     const endISO   = eventEnd ? `${eventDate}T${eventEnd}:00` : `${eventDate}T${String(parseInt(eventStart.split(":")[0])+1).padStart(2,"0")}:${eventStart.split(":")[1]}:00`;
 
     const res = await fetch("/api/google-calendar", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ summary: eventTitle, start: startISO, end: endISO, location: eventLocation, description: eventDesc }),
     });
     const data = await res.json() as CalendarEvent & { error?: string };
@@ -95,7 +100,7 @@ export default function GoogleTab() {
 
   async function deleteEvent(id: string) {
     if (!confirm("Delete this event from Google Calendar?")) return;
-    await fetch(`/api/google-calendar?id=${id}`, { method: "DELETE" });
+    await fetch(`/api/google-calendar?id=${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
     setEvents(prev => prev.filter(e => e.id !== id));
   }
 
@@ -103,7 +108,7 @@ export default function GoogleTab() {
     if (!taskTitle.trim()) { setError("Task title is required"); return; }
     setSavingTask(true); setError("");
     const res = await fetch("/api/google-tasks", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ title: taskTitle, due: taskDue ? `${taskDue}T00:00:00Z` : undefined, notes: taskNotes }),
     });
     const data = await res.json() as Task & { error?: string };
@@ -114,13 +119,13 @@ export default function GoogleTab() {
   }
 
   async function completeTask(id: string) {
-    await fetch(`/api/google-tasks?id=${id}`, { method: "PATCH" });
+    await fetch(`/api/google-tasks?id=${id}`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } });
     setTasks(prev => prev.filter(t => t.id !== id));
   }
 
   async function deleteTask(id: string) {
     if (!confirm("Delete this task?")) return;
-    await fetch(`/api/google-tasks?id=${id}`, { method: "DELETE" });
+    await fetch(`/api/google-tasks?id=${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
     setTasks(prev => prev.filter(t => t.id !== id));
   }
 

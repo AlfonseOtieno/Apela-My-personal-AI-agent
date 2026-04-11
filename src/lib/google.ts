@@ -63,13 +63,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
 // ── Get stored token from Supabase, refresh if needed ────────────────────────
 import { supabaseAdmin } from "./supabase";
 
-export async function getValidAccessToken(): Promise<string> {
+export async function getValidAccessToken(userId?: string): Promise<string> {
   const db = supabaseAdmin();
-  const { data, error } = await db
-    .from("oauth_tokens")
-    .select("*")
-    .eq("provider", "google")
-    .single();
+  let q = db.from("oauth_tokens").select("*").eq("provider", "google");
+  if (userId) q = q.eq("user_id", userId);
+  const { data, error } = await q.single();
 
   if (error || !data) throw new Error("Google not connected. Go to Dashboard → Google tab to connect.");
 
@@ -81,11 +79,13 @@ export async function getValidAccessToken(): Promise<string> {
     // Refresh
     const newToken = await refreshAccessToken(data.refresh_token);
     const newExpiry = new Date(Date.now() + 3600 * 1000).toISOString();
-    await db.from("oauth_tokens").update({
+    const updateQ = db.from("oauth_tokens").update({
       access_token: newToken,
       expires_at:   newExpiry,
       updated_at:   new Date().toISOString(),
     }).eq("provider", "google");
+    if (userId) updateQ.eq("user_id", userId);
+    await updateQ;
     return newToken;
   }
 
@@ -103,8 +103,8 @@ export type CalendarEvent = {
   location?: string;
 };
 
-export async function listTodayEvents(): Promise<CalendarEvent[]> {
-  const token = await getValidAccessToken();
+export async function listTodayEvents(userId?: string): Promise<CalendarEvent[]> {
+  const token = await getValidAccessToken(userId);
   const now   = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const end   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
@@ -126,8 +126,8 @@ export async function listTodayEvents(): Promise<CalendarEvent[]> {
   }));
 }
 
-export async function listUpcomingEvents(days = 7): Promise<CalendarEvent[]> {
-  const token = await getValidAccessToken();
+export async function listUpcomingEvents(days = 7, userId?: string): Promise<CalendarEvent[]> {
+  const token = await getValidAccessToken(userId);
   const start = new Date().toISOString();
   const end   = new Date(Date.now() + days * 86400000).toISOString();
 
@@ -148,8 +148,8 @@ export async function listUpcomingEvents(days = 7): Promise<CalendarEvent[]> {
   }));
 }
 
-export async function createCalendarEvent(event: CalendarEvent): Promise<CalendarEvent> {
-  const token = await getValidAccessToken();
+export async function createCalendarEvent(event: CalendarEvent, userId?: string): Promise<CalendarEvent> {
+  const token = await getValidAccessToken(userId);
   const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -169,8 +169,8 @@ export async function createCalendarEvent(event: CalendarEvent): Promise<Calenda
   return { id: data.id, summary: data.summary, start: data.start.dateTime || "", end: data.end.dateTime || "" };
 }
 
-export async function deleteCalendarEvent(eventId: string): Promise<void> {
-  const token = await getValidAccessToken();
+export async function deleteCalendarEvent(eventId: string, userId?: string): Promise<void> {
+  const token = await getValidAccessToken(userId);
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
     { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
@@ -190,8 +190,8 @@ export type Task = {
 
 const DEFAULT_TASKLIST = "@default";
 
-export async function listTasks(): Promise<Task[]> {
-  const token = await getValidAccessToken();
+export async function listTasks(userId?: string): Promise<Task[]> {
+  const token = await getValidAccessToken(userId);
   const res = await fetch(
     `https://tasks.googleapis.com/tasks/v1/lists/${DEFAULT_TASKLIST}/tasks?showCompleted=false&maxResults=50`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -207,8 +207,8 @@ export async function listTasks(): Promise<Task[]> {
   }));
 }
 
-export async function createTask(task: Task): Promise<Task> {
-  const token = await getValidAccessToken();
+export async function createTask(task: Task, userId?: string): Promise<Task> {
+  const token = await getValidAccessToken(userId);
   const res = await fetch(
     `https://tasks.googleapis.com/tasks/v1/lists/${DEFAULT_TASKLIST}/tasks`,
     {
@@ -225,8 +225,8 @@ export async function createTask(task: Task): Promise<Task> {
   return { id: data.id, title: data.title, notes: data.notes, due: data.due };
 }
 
-export async function completeTask(taskId: string): Promise<void> {
-  const token = await getValidAccessToken();
+export async function completeTask(taskId: string, userId?: string): Promise<void> {
+  const token = await getValidAccessToken(userId);
   await fetch(
     `https://tasks.googleapis.com/tasks/v1/lists/${DEFAULT_TASKLIST}/tasks/${taskId}`,
     {
@@ -237,8 +237,8 @@ export async function completeTask(taskId: string): Promise<void> {
   );
 }
 
-export async function deleteTask(taskId: string): Promise<void> {
-  const token = await getValidAccessToken();
+export async function deleteTask(taskId: string, userId?: string): Promise<void> {
+  const token = await getValidAccessToken(userId);
   const res = await fetch(
     `https://tasks.googleapis.com/tasks/v1/lists/${DEFAULT_TASKLIST}/tasks/${taskId}`,
     { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
