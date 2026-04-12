@@ -167,7 +167,16 @@ export default function ChatPage() {
     if (inputRef.current) inputRef.current.style.height = "44px";
     setLoading(true);
     try {
-      const res  = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message:text.trim() }) });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || "";
+      const res  = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ message: text.trim() }),
+      });
       const data = await res.json() as { reply:string };
       setMessages(prev => [...prev, { id:`a-${Date.now()}`, role:"assistant", content:data.reply, time:nowTime() }]);
     } catch {
