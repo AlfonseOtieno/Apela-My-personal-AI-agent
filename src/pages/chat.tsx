@@ -131,9 +131,21 @@ export default function ChatPage() {
 
   // Auth check + load messages
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) { window.location.href = "/login"; return; }
       setSession(data.session);
+
+      // Check if user has set their Gemini API key
+      const settingsRes = await fetch("/api/settings", {
+        headers: { Authorization: `Bearer ${data.session.access_token}` }
+      });
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json() as { gemini_key?: string };
+        if (!settings.gemini_key) {
+          window.location.href = "/onboarding";
+          return;
+        }
+      }
     });
   }, []);
 
