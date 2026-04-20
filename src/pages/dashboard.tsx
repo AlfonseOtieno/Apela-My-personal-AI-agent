@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
 import GoogleTab from "@/components/GoogleTab";
 import Head from "next/head";
 import Link from "next/link";
@@ -73,9 +74,12 @@ function CalendarView() {
     setLoading(true);
     const from = format(startOfMonth(currentMonth), "yyyy-MM-dd");
     const to   = format(endOfMonth(currentMonth),   "yyyy-MM-dd");
+    const { data: sData } = await supabase.auth.getSession();
+    const tok = sData.session?.access_token || "";
+    const hdr = { Authorization: `Bearer ${tok}` };
     const [logsRes, plannedRes] = await Promise.all([
-      fetch(`/api/logs?from=${from}&to=${to}`).then(r => r.json()),
-      fetch("/api/planned-habits").then(r => r.json()),
+      fetch(`/api/logs?from=${from}&to=${to}`, { headers: hdr }).then(r => r.json()),
+      fetch("/api/planned-habits", { headers: hdr }).then(r => r.json()),
     ]);
     setLogs(Array.isArray(logsRes) ? logsRes : []);
     setPlanned(Array.isArray(plannedRes) ? plannedRes : []);
@@ -91,7 +95,9 @@ function CalendarView() {
 
   async function deleteLog(id: string) {
     if (!confirm("Delete this log entry?")) return;
-    await fetch(`/api/logs?id=${id}`, { method: "DELETE" });
+    const { data: sData } = await supabase.auth.getSession();
+    const token = sData.session?.access_token || "";
+    await fetch(`/api/logs?id=${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
     const updated = dayLogs.filter(l => l.id !== id);
     setDayLogs(updated);
     setLogs(prev => prev.filter(l => l.id !== id));
@@ -270,8 +276,12 @@ function PlannedHabitForm({
     };
 
     const method = isEdit ? "PATCH" : "POST";
+    const { data: sData } = await supabase.auth.getSession();
+    const token = sData.session?.access_token || "";
     const res  = await fetch("/api/planned-habits", {
-      method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      method,
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify(body),
     });
     const data = await res.json() as PlannedHabit & { error?: string };
     if (data.error) { setErr(data.error); setSaving(false); return; }
@@ -390,28 +400,35 @@ export default function Dashboard() {
   const [editingHabit, setEditingHabit] = useState<PlannedHabit | null>(null);
 
   useEffect(() => {
-    // Read tab from URL params (e.g. after Google OAuth redirect)
     const params = new URLSearchParams(window.location.search);
     const urlTab = params.get("tab");
     if (urlTab) setTab(urlTab as typeof tab);
-    // Clean URL without reload
     if (params.toString()) window.history.replaceState({}, "", window.location.pathname);
 
-    Promise.all([
-      fetch("/api/stats").then(r => r.json()),
-      fetch("/api/planned-habits").then(r => r.json()),
-      fetch("/api/reports").then(r => r.json()),
-    ]).then(([s, p, r]) => {
-      setStats(Array.isArray(s) ? s : []);
-      setPlanned(Array.isArray(p) ? p : []);
-      setReports(Array.isArray(r) ? r : []);
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session) { window.location.href = "/login"; return; }
+      const token = data.session.access_token;
+      const h = { Authorization: `Bearer ${token}` };
+
+      try {
+        const [s, p, r] = await Promise.all([
+          fetch("/api/stats",          { headers: h }).then(r => r.json()),
+          fetch("/api/planned-habits", { headers: h }).then(r => r.json()),
+          fetch("/api/reports",        { headers: h }).then(r => r.json()),
+        ]);
+        setStats(Array.isArray(s) ? s : []);
+        setPlanned(Array.isArray(p) ? p : []);
+        setReports(Array.isArray(r) ? r : []);
+      } catch { /* ignore */ }
       setLoading(false);
-    }).catch(() => setLoading(false));
+    });
   }, []);
 
   async function generateReport(type: "week"|"month"|"year") {
     setGenLoading(true);
-    const res  = await fetch("/api/reports", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ period_type:type }) });
+    const { data: sData } = await supabase.auth.getSession();
+    const token = sData.session?.access_token || "";
+    const res  = await fetch("/api/reports", { method:"POST", headers:{"Content-Type":"application/json", "Authorization": `Bearer ${token}`}, body:JSON.stringify({ period_type:type }) });
     const data = await res.json() as { content:string };
     setReports(prev => [{ id:Date.now().toString(), period:type, period_type:type, content:data.content, created_at:new Date().toISOString() }, ...prev]);
     setTab("reports");
@@ -420,13 +437,17 @@ export default function Dashboard() {
 
   async function removePlanned(id: string) {
     if (!confirm("Remove this planned habit?")) return;
-    await fetch(`/api/planned-habits?id=${id}`, { method:"DELETE" });
+    const { data: sData } = await supabase.auth.getSession();
+    const token = sData.session?.access_token || "";
+    await fetch(`/api/planned-habits?id=${id}`, { method:"DELETE", headers: { Authorization: `Bearer ${token}` } });
     setPlanned(prev => prev.filter(p => p.id !== id));
   }
 
   async function clearChat() {
     if (!confirm("Clear all chat messages? Cannot be undone.")) return;
-    await fetch("/api/clear-messages", { method:"DELETE" });
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token || "";
+    await fetch("/api/clear-messages", { method:"DELETE", headers: { Authorization: `Bearer ${token}` } });
     alert("Chat history cleared.");
   }
 
@@ -555,7 +576,8 @@ export default function Dashboard() {
                     <h3 style={{ fontSize:15, fontWeight:600, textTransform:"capitalize" }}>{s.name}</h3>
                     <button onClick={async () => {
                       if (!confirm(`Delete ALL ${s.name} logs? This cannot be undone.`)) return;
-                      await fetch(`/api/logs?habit=${encodeURIComponent(s.name)}`, { method:"DELETE" });
+                      const { data: delSess } = await supabase.auth.getSession();
+                      await fetch(`/api/logs?habit=${encodeURIComponent(s.name)}`, { method:"DELETE", headers: { Authorization: `Bearer ${delSess.session?.access_token || ""}` } });
                       window.location.reload();
                     }} style={{ background:"none", border:"1px solid #2a2a2a", borderRadius:5, color:"#f04444", fontSize:11, padding:"5px 10px", cursor:"pointer", fontFamily:"inherit" }}>
                       Delete all

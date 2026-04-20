@@ -189,12 +189,14 @@ export async function getStreak(habitName: string, userId?: string): Promise<num
 }
 
 // ── Get all habit stats for dashboard ────────────────────────────────────────
-export async function getAllHabitStats() {
+export async function getAllHabitStats(userId?: string) {
   const db = supabaseAdmin();
-  const { data } = await db
+  let q = db
     .from("habit_logs")
     .select("habit_name, duration, date, feeling")
     .order("date", { ascending: false });
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q;
 
   if (!data?.length) return [];
 
